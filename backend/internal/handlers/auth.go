@@ -145,9 +145,27 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// In a stateless JWT setup, logout is handled client-side
-	// You could implement a blacklist for tokens if needed
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	// Get the user ID from context
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	// In a stateless JWT setup, logout is primarily handled client-side
+	// The server can't invalidate JWT tokens, but we can log the logout event
+	// and potentially implement a token blacklist in the future
+
+	// For now, we'll just return success
+	// In production, you might want to:
+	// 1. Add the token to a blacklist
+	// 2. Log the logout event
+	// 3. Clear any server-side sessions
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Logged out successfully",
+		"user_id": userID,
+	})
 }
 
 func (h *AuthHandler) GetProfile(c *gin.Context) {

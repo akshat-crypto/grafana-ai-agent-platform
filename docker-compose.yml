@@ -35,7 +35,8 @@ services:
       - DB_PASSWORD=password
       - DB_NAME=kubernetes_ai_platform
       - JWT_SECRET=your-secret-key-change-in-production
-      - OPENROUTER_KEY=${OPENROUTER_KEY:-your-openrouter-api-key}
+      - OPENAI_KEY=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
+      - OPENROUTER_KEY=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
     ports:
       - "8080:8080"
     depends_on:

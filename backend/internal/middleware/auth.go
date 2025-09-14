@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // AuthMiddleware validates JWT tokens
@@ -21,16 +23,51 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			token = token[7:]
 		}
 
-		// For now, we'll just check if token exists
-		// In production, you should validate the JWT token properly
-		if token == "" {
+		// Validate JWT token
+		claims := jwt.MapClaims{}
+		parsedToken, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
+			return []byte(jwtSecret), nil
+		})
+
+		if err != nil || !parsedToken.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 			c.Abort()
 			return
 		}
 
-		// Set user ID in context (you can extract this from JWT)
-		c.Set("user_id", 1) // Placeholder
+		// Extract user ID from JWT claims
+		userIDFloat, exists := claims["user_id"]
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.Abort()
+			return
+		}
+
+		// Convert user ID to uint
+		var userID uint
+		switch v := userIDFloat.(type) {
+		case float64:
+			userID = uint(v)
+		case int:
+			userID = uint(v)
+		case int64:
+			userID = uint(v)
+		case string:
+			if parsedID, err := strconv.ParseUint(v, 10, 32); err == nil {
+				userID = uint(parsedID)
+			} else {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID in token"})
+				c.Abort()
+				return
+			}
+		default:
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID type in token"})
+			c.Abort()
+			return
+		}
+
+		// Set user ID in context
+		c.Set("user_id", userID)
 		c.Next()
 	}
 }

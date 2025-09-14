@@ -34,6 +34,6 @@ type ClusterStatus struct {
 	ID       uint   `json:"id"`
 	Name     string `json:"name"`
 	Status   string `json:"status"`
-	IsActive bool   `json:"is_active"`
+	IsActive bool   `json:"isActive"`
 	Version  string `json:"version"`
 }

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"grafana-ai-agent-platform/backend/internal/models"
@@ -36,12 +37,35 @@ func (h *KubernetesHandler) ValidateCluster(c *gin.Context) {
 		return
 	}
 
+	// Log the request for debugging
+	fmt.Printf("Validating kubeconfig for user, length: %d\n", len(req.KubeConfig))
+
+	// Basic validation
+	if req.KubeConfig == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"is_valid": false,
+			"error":    "Kubeconfig is empty",
+		})
+		return
+	}
+
+	// Validate kubeconfig format first
+	if err := kubernetes.ValidateKubeconfigFormat(req.KubeConfig); err != nil {
+		fmt.Printf("Kubeconfig format validation failed: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"is_valid": false,
+			"error":    fmt.Sprintf("Invalid kubeconfig format: %v", err),
+		})
+		return
+	}
+
 	// Create Kubernetes client
 	client, err := kubernetes.NewKubernetesClient(req.KubeConfig)
 	if err != nil {
+		fmt.Printf("Failed to create Kubernetes client: %v\n", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"is_valid": false,
-			"error":    "Invalid kubeconfig format",
+			"error":    fmt.Sprintf("Failed to create Kubernetes client: %v", err),
 		})
 		return
 	}
@@ -49,9 +73,10 @@ func (h *KubernetesHandler) ValidateCluster(c *gin.Context) {
 	// Validate cluster connection
 	clusterInfo, err := client.ValidateCluster()
 	if err != nil {
+		fmt.Printf("Failed to validate cluster: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"is_valid": false,
-			"error":    "Failed to validate cluster",
+			"error":    fmt.Sprintf("Failed to validate cluster: %v", err),
 		})
 		return
 	}
@@ -72,28 +97,44 @@ func (h *KubernetesHandler) AddCluster(c *gin.Context) {
 		return
 	}
 
-	// Validate kubeconfig first
+	// Validate kubeconfig format first
+	if err := kubernetes.ValidateKubeconfigFormat(req.KubeConfig); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("Invalid kubeconfig format: %v", err),
+		})
+		return
+	}
+
+	// Try to create Kubernetes client and validate cluster
+	var clusterInfo *kubernetes.ClusterInfo
+	var clusterURL string
+	var status string
+	var isActive bool
+	var version string
+
 	client, err := kubernetes.NewKubernetesClient(req.KubeConfig)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid kubeconfig format"})
-		return
-	}
-
-	clusterInfo, err := client.ValidateCluster()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to validate cluster connection"})
-		return
-	}
-
-	if !clusterInfo.IsValid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": clusterInfo.Error})
-		return
-	}
-
-	// Extract cluster URL
-	clusterURL, err := kubernetes.ExtractClusterInfo(req.KubeConfig)
-	if err != nil {
-		clusterURL = clusterInfo.ServerURL
+		// Cluster creation failed, but we'll save it as inactive
+		status = "inactive"
+		isActive = false
+		version = "unknown"
+		clusterURL = "unknown"
+	} else {
+		// Try to validate the cluster
+		clusterInfo, err = client.ValidateCluster()
+		if err != nil {
+			// Cluster validation failed, mark as inactive
+			status = "inactive"
+			isActive = false
+			version = "unknown"
+			clusterURL = "unknown"
+		} else {
+			// Cluster is working
+			status = "active"
+			isActive = true
+			version = clusterInfo.Version
+			clusterURL = clusterInfo.ServerURL
+		}
 	}
 
 	// Create cluster record
@@ -102,9 +143,9 @@ func (h *KubernetesHandler) AddCluster(c *gin.Context) {
 		Name:       req.Name,
 		KubeConfig: req.KubeConfig,
 		ClusterURL: clusterURL,
-		Version:    clusterInfo.Version,
-		Status:     "active",
-		IsActive:   true,
+		Version:    version,
+		Status:     status,
+		IsActive:   isActive,
 	}
 
 	if err := h.db.DB.Create(&cluster).Error; err != nil {
@@ -112,10 +153,19 @@ func (h *KubernetesHandler) AddCluster(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Cluster added successfully",
-		"cluster": cluster,
-	})
+	// Return appropriate response based on cluster status
+	if isActive {
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Cluster added successfully",
+			"cluster": cluster,
+		})
+	} else {
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Cluster added but marked as inactive due to connection issues",
+			"cluster": cluster,
+			"warning": "Cluster could not be reached. Use the refresh button to retry connection.",
+		})
+	}
 }
 
 func (h *KubernetesHandler) GetClusters(c *gin.Context) {
@@ -203,4 +253,73 @@ func (h *KubernetesHandler) GetClusterResources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resources)
+}
+
+func (h *KubernetesHandler) RefreshClusterStatus(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	clusterID := c.Param("id")
+	if clusterID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cluster ID required"})
+		return
+	}
+
+	// Get cluster
+	var cluster models.KubernetesCluster
+	if err := h.db.DB.Where("id = ? AND user_id = ?", clusterID, userID).First(&cluster).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cluster not found"})
+		return
+	}
+
+	// Test cluster connectivity
+	client, err := kubernetes.NewKubernetesClient(cluster.KubeConfig)
+	if err != nil {
+		// Update cluster status to inactive
+		h.db.DB.Model(&cluster).Updates(map[string]interface{}{
+			"status":    "inactive",
+			"is_active": false,
+		})
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Cluster status updated",
+			"status":    "inactive",
+			"is_active": false,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	// Test cluster connection
+	clusterInfo, err := client.ValidateCluster()
+	if err != nil {
+		// Update cluster status to inactive
+		h.db.DB.Model(&cluster).Updates(map[string]interface{}{
+			"status":    "inactive",
+			"is_active": false,
+		})
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Cluster status updated",
+			"status":    "inactive",
+			"is_active": false,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	// Update cluster status to active
+	h.db.DB.Model(&cluster).Updates(map[string]interface{}{
+		"status":    "active",
+		"is_active": true,
+		"version":   clusterInfo.Version,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Cluster status updated",
+		"status":    "active",
+		"is_active": true,
+		"version":   clusterInfo.Version,
+	})
 }

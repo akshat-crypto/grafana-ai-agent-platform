@@ -25,10 +25,20 @@ type ClusterInfo struct {
 }
 
 func NewKubernetesClient(kubeconfig string) (*KubernetesClient, error) {
+	// Basic validation
+	if kubeconfig == "" {
+		return nil, fmt.Errorf("kubeconfig is empty")
+	}
+
 	// Parse kubeconfig
 	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
+	}
+
+	// Validate the config
+	if config.Host == "" {
+		return nil, fmt.Errorf("no server URL found in kubeconfig")
 	}
 
 	// Create clientset
@@ -111,6 +121,10 @@ func (k *KubernetesClient) ApplyManifest(manifest string) error {
 }
 
 func ParseKubeconfig(kubeconfig string) (*api.Config, error) {
+	if kubeconfig == "" {
+		return nil, fmt.Errorf("kubeconfig is empty")
+	}
+
 	config, err := clientcmd.Load([]byte(kubeconfig))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
@@ -120,7 +134,37 @@ func ParseKubeconfig(kubeconfig string) (*api.Config, error) {
 		return nil, fmt.Errorf("no contexts found in kubeconfig")
 	}
 
+	// Check if current context is set
+	if config.CurrentContext == "" {
+		return nil, fmt.Errorf("no current context found in kubeconfig")
+	}
+
+	// Validate the current context exists
+	currentContext, exists := config.Contexts[config.CurrentContext]
+	if !exists {
+		return nil, fmt.Errorf("current context '%s' not found in kubeconfig", config.CurrentContext)
+	}
+
+	// Validate cluster exists
+	_, exists = config.Clusters[currentContext.Cluster]
+	if !exists {
+		return nil, fmt.Errorf("cluster '%s' not found in kubeconfig", currentContext.Cluster)
+	}
+
+	// Validate auth info exists
+	if currentContext.AuthInfo != "" {
+		_, exists = config.AuthInfos[currentContext.AuthInfo]
+		if !exists {
+			return nil, fmt.Errorf("auth info '%s' not found in kubeconfig", currentContext.AuthInfo)
+		}
+	}
+
 	return config, nil
+}
+
+func ValidateKubeconfigFormat(kubeconfig string) error {
+	_, err := ParseKubeconfig(kubeconfig)
+	return err
 }
 
 func ExtractClusterInfo(kubeconfig string) (string, error) {

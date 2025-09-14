@@ -26,7 +26,12 @@ func main() {
 	defer db.Close()
 
 	// Initialize AI agent
-	aiAgent := agent.NewAIAgent(cfg)
+	aiAgent := agent.NewAIAgent(&agent.Config{
+		OpenAIAPIKey:     cfg.OpenAI.APIKey,
+		OpenRouterAPIKey: cfg.OpenRouter.APIKey,
+		Model:            "deepseek/deepseek-chat-v3.1:free",
+		UseOpenRouter:    true, // Use OpenRouter instead of OpenAI
+	})
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(db, cfg)
@@ -73,6 +78,7 @@ func main() {
 				kubernetes.GET("/clusters", kubernetesHandler.GetClusters)
 				kubernetes.DELETE("/clusters/:id", kubernetesHandler.DeleteCluster)
 				kubernetes.GET("/clusters/:id/resources", kubernetesHandler.GetClusterResources)
+				kubernetes.POST("/clusters/:id/refresh", kubernetesHandler.RefreshClusterStatus)
 			}
 
 			// AI Agent routes

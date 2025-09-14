@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import {
@@ -18,6 +18,7 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: HomeIcon },
@@ -26,10 +27,51 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
   ];
 
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
+  const handleLogout = async () => {
+    try {
+      // Call logout API
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        // Clear local state
+        logout();
+        // Redirect to login
+        router.push('/login');
+      } else {
+        console.error('Logout failed');
+        // Still clear local state and redirect
+        logout();
+        router.push('/login');
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Clear local state and redirect even if API call fails
+      logout();
+      router.push('/login');
+    }
   };
+
+  const toggleUserMenu = () => {
+    setShowUserMenu(!showUserMenu);
+  };
+
+  // Close user menu when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.user-menu')) {
+        setShowUserMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -81,8 +123,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </button>
               
               {/* User menu */}
-              <div className="relative">
-                <button className="flex items-center space-x-2 text-gray-700 hover:text-gray-900">
+              <div className="relative user-menu">
+                <button 
+                  onClick={toggleUserMenu}
+                  className="flex items-center space-x-2 text-gray-700 hover:text-gray-900 p-2 rounded-md hover:bg-gray-100"
+                >
                   <UserCircleIcon className="h-6 w-6" />
                   <span className="text-sm font-medium">
                     {user?.firstName} {user?.lastName}
@@ -90,14 +135,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 </button>
                 
                 {/* Dropdown menu */}
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
-                  <button
-                    onClick={handleLogout}
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    Sign out
-                  </button>
-                </div>
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
+                    <button
+                      onClick={handleLogout}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors duration-150"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

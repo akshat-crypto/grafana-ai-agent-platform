@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
-import { PlusIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, TrashIcon, CheckCircleIcon, XCircleIcon, DocumentArrowUpIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import apiClient from '../utils/api';
 import toast from 'react-hot-toast';
 
@@ -26,6 +26,9 @@ const KubernetesPage: React.FC = () => {
   const [kubeConfig, setKubeConfig] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [inputMethod, setInputMethod] = useState<'text' | 'file'>('text');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadClusters();
@@ -38,19 +41,32 @@ const KubernetesPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to load clusters:', error);
       setClusters([]); 
+    }
+  };
 
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      // Read the file content
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        setKubeConfig(content);
+      };
+      reader.readAsText(file);
     }
   };
 
   const validateKubeConfig = async () => {
     if (!kubeConfig.trim()) {
-      toast.error('Please enter a kubeconfig');
+      toast.error('Please enter a kubeconfig or upload a file');
       return;
     }
 
     setIsValidating(true);
     try {
-      const response = await apiClient.validateCluster({ kubeConfig: kubeConfig.trim() });
+      const response = await apiClient.validateCluster({ kube_config: kubeConfig.trim() });
       setValidationResult(response.data);
       
       if (response.data.is_valid) {
@@ -79,14 +95,16 @@ const KubernetesPage: React.FC = () => {
     try {
       await apiClient.addCluster({
         name: clusterName.trim(),
-        kubeConfig: kubeConfig.trim(),
+        kube_config: kubeConfig.trim(),
       });
       
       toast.success('Cluster added successfully!');
       setIsAddingCluster(false);
       setClusterName('');
       setKubeConfig('');
+      setSelectedFile(null);
       setValidationResult(null);
+      setInputMethod('text');
       loadClusters();
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to add cluster');
@@ -100,8 +118,30 @@ const KubernetesPage: React.FC = () => {
       await apiClient.deleteCluster(id.toString());
       toast.success('Cluster deleted successfully!');
       loadClusters();
-    } catch (error: any) {
+    } catch (error) {
       toast.error(error.response?.data?.error || 'Failed to delete cluster');
+    }
+  };
+
+  const refreshCluster = async (id: number) => {
+    try {
+      await apiClient.refreshClusterStatus(id.toString());
+      toast.success('Cluster refreshed successfully!');
+      loadClusters();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to refresh cluster');
+    }
+  };
+
+  const resetForm = () => {
+    setIsAddingCluster(false);
+    setClusterName('');
+    setKubeConfig('');
+    setSelectedFile(null);
+    setValidationResult(null);
+    setInputMethod('text');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -146,12 +186,75 @@ const KubernetesPage: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Kubeconfig
                 </label>
-                <textarea
-                  value={kubeConfig}
-                  onChange={(e) => setKubeConfig(e.target.value)}
-                  placeholder="Paste your kubeconfig here..."
-                  className="input-field h-32 resize-none font-mono text-sm"
-                />
+                
+                {/* Input Method Toggle */}
+                <div className="flex space-x-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setInputMethod('text')}
+                    className={`px-3 py-2 text-sm font-medium rounded-md ${
+                      inputMethod === 'text'
+                        ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                        : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
+                    }`}
+                  >
+                    Paste Text
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMethod('file')}
+                    className={`px-3 py-2 text-sm font-medium rounded-md ${
+                      inputMethod === 'file'
+                        ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                        : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
+                    }`}
+                  >
+                    Upload File
+                  </button>
+                </div>
+
+                {/* File Upload */}
+                {inputMethod === 'file' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".yaml,.yml,.txt"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="btn-secondary flex items-center space-x-2"
+                      >
+                        <DocumentArrowUpIcon className="h-4 w-4" />
+                        <span>Choose File</span>
+                      </button>
+                      {selectedFile && (
+                        <span className="text-sm text-gray-600">
+                          {selectedFile.name}
+                        </span>
+                      )}
+                    </div>
+                    {selectedFile && (
+                      <div className="text-xs text-gray-500">
+                        File loaded: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Text Input */}
+                {inputMethod === 'text' && (
+                  <textarea
+                    value={kubeConfig}
+                    onChange={(e) => setKubeConfig(e.target.value)}
+                    placeholder="Paste your kubeconfig here..."
+                    className="input-field h-32 resize-none font-mono text-sm"
+                  />
+                )}
               </div>
 
               {/* Validation Result */}
@@ -202,12 +305,7 @@ const KubernetesPage: React.FC = () => {
                   Add Cluster
                 </button>
                 <button
-                  onClick={() => {
-                    setIsAddingCluster(false);
-                    setClusterName('');
-                    setKubeConfig('');
-                    setValidationResult(null);
-                  }}
+                  onClick={resetForm}
                   className="btn-secondary"
                 >
                   Cancel
@@ -226,12 +324,20 @@ const KubernetesPage: React.FC = () => {
                   <h3 className="text-lg font-semibold text-gray-900">{cluster.name}</h3>
                   <p className="text-sm text-gray-500">v{cluster.version}</p>
                 </div>
-                <button
-                  onClick={() => deleteCluster(cluster.id)}
-                  className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => deleteCluster(cluster.id)}
+                    className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => refreshCluster(cluster.id)}
+                    className="p-1 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded"
+                  >
+                    <ArrowPathIcon className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               
               <div className="space-y-2">

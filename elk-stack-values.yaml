@@ -1,0 +1,159 @@
+# ELK Stack Helm Values
+# This file contains configuration for Elasticsearch, Logstash, and Kibana
+
+# Elasticsearch Configuration
+elasticsearch:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  storage:
+    size: "10Gi"
+  security:
+    tls:
+      enabled: false  # Disable for development
+    auth:
+      enabled: false  # Disable for development
+
+# Logstash Configuration
+logstash:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  config:
+    logstash.yml: |
+      http.host: "0.0.0.0"
+      xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch-master:9200"]
+    pipelines.yml: |
+      - pipeline.id: main
+        path.config: "/usr/share/logstash/pipeline"
+    main.conf: |
+      input {
+        beats {
+          port => 5044
+        }
+        tcp {
+          port => 5000
+        }
+      }
+      
+      filter {
+        if [type] == "kubernetes" {
+          mutate {
+            add_field => { "kubernetes_cluster" => "%{[kubernetes][cluster_name]}" }
+          }
+        }
+      }
+      
+      output {
+        elasticsearch {
+          hosts => ["elasticsearch-master:9200"]
+          index => "logstash-%{+YYYY.MM.dd}"
+        }
+        stdout { codec => rubydebug }
+      }
+
+# Kibana Configuration
+kibana:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  config:
+    kibana.yml: |
+      server.host: "0.0.0.0"
+      elasticsearch.hosts: ["http://elasticsearch-master:9200"]
+      xpack.security.enabled: false  # Disable for development
+
+# Filebeat Configuration (for collecting logs)
+filebeat:
+  enabled: true
+  daemonset:
+    enabled: true
+    resources:
+      requests:
+        memory: "100Mi"
+        cpu: "100m"
+      limits:
+        memory: "200Mi"
+        cpu: "200m"
+    config:
+      filebeat.yml: |
+        filebeat.inputs:
+        - type: container
+          paths:
+            - /var/log/containers/*.log
+          processors:
+            - add_kubernetes_metadata:
+                host: ${NODE_NAME}
+                matchers:
+                - logs_path:
+                    logs_path: "/var/log/containers/"
+        
+        - type: log
+          enabled: true
+          paths:
+            - /var/log/*.log
+            - /var/log/messages
+            - /var/log/syslog
+        
+        processors:
+          - add_host_metadata:
+              when.not.contains.tags: forwarded
+          - add_kubernetes_metadata:
+              host: ${NODE_NAME}
+              matchers:
+              - logs_path:
+                  logs_path: "/var/log/containers/"
+        
+        output.logstash:
+          hosts: ["logstash:5044"]
+        
+        setup.kibana:
+          host: "kibana:5601"
+
+# Ingress Configuration (if using ingress)
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: elk.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Service Configuration
+service:
+  type: ClusterIP
+  elasticsearch:
+    port: 9200
+  logstash:
+    port: 5044
+  kibana:
+    port: 5601
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi 

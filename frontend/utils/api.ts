@@ -68,12 +68,12 @@ class ApiClient {
   }
 
   // Kubernetes endpoints
-  async validateCluster(data: { kubeConfig: string }) {
-    return this.client.post('/api/kubernetes/validate', {kubeConfig: data.kubeConfig});
+  async validateCluster(data: { kube_config: string }) {
+    return this.client.post('/api/kubernetes/validate', {kube_config: data.kube_config});
   }
 
-  async addCluster(data: { name: string; kubeConfig: string }) {
-    return this.client.post('/api/kubernetes/clusters', {name: data.name, kubeConfig: data.kubeConfig});
+  async addCluster(data: { name: string; kube_config: string }) {
+    return this.client.post('/api/kubernetes/clusters', {name: data.name, kube_config: data.kube_config});
   }
 
   async getClusters() {
@@ -82,6 +82,10 @@ class ApiClient {
 
   async deleteCluster(id: string) {
     return this.client.delete(`/api/kubernetes/clusters/${id}`);
+  }
+
+  async refreshClusterStatus(id: string) {
+    return this.client.post(`/api/kubernetes/clusters/${id}/refresh`);
   }
 
   async getClusterResources(id: string) {

@@ -9,6 +9,7 @@ type Config struct {
 	Server     ServerConfig
 	Database   DatabaseConfig
 	JWT        JWTConfig
+	OpenAI     OpenAIConfig
 	OpenRouter OpenRouterConfig
 }
 
@@ -28,6 +29,10 @@ type DatabaseConfig struct {
 
 type JWTConfig struct {
 	Secret string
+}
+
+type OpenAIConfig struct {
+	APIKey string
 }
 
 type OpenRouterConfig struct {
@@ -50,6 +55,9 @@ func LoadConfig() *Config {
 		},
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
+		},
+		OpenAI: OpenAIConfig{
+			APIKey: getEnv("OPENAI_KEY", ""),
 		},
 		OpenRouter: OpenRouterConfig{
 			APIKey: getEnv("OPENROUTER_KEY", ""),
